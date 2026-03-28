@@ -2,10 +2,11 @@ use std::hash::Hash;
 
 use event_bus::{EventBus, Topic};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum AppEvent {
     UserJoined { name: String },
     MessageSent { from: String, text: String },
+    LobbyMsg { lobby: u64, text: String },
 }
 
 #[derive(Hash)]
@@ -13,6 +14,21 @@ struct UserJoined;
 
 #[derive(Hash)]
 struct MessageSent;
+
+#[derive(Hash)]
+struct LobbyMsg {
+    lobby: u64,
+}
+
+impl Topic<AppEvent> for LobbyMsg {
+    type Payload = String;
+    fn into_event(self, text: String) -> AppEvent {
+        AppEvent::LobbyMsg {
+            lobby: self.lobby,
+            text,
+        }
+    }
+}
 
 impl Topic<AppEvent> for UserJoined {
     type Payload = String;
@@ -34,26 +50,58 @@ async fn main() {
 
     let mut conn = bus.connect();
 
-    // subscribe before emitting so the bus handler processes
-    // the subscriptions first (same channel, guaranteed FIFO ordering)
     conn.subscribe(&UserJoined);
     conn.subscribe(&MessageSent);
+    conn.subscribe(&LobbyMsg { lobby: 64 });
 
     bus.emit(UserJoined, "Alice".to_string());
     bus.emit(
         MessageSent,
         ("Alice".to_string(), "Hello, world!".to_string()),
     );
+    bus.emit(LobbyMsg { lobby: 64 }, "Welcome to the lobby!".to_string());
+    bus.emit(LobbyMsg { lobby: 65 }, "Welcome to the lobby!".to_string());
+    bus.emit(
+        MessageSent,
+        ("Alice".to_string(), "Hello, world!".to_string()),
+    );
 
-    // recv() returns Option<Arc<AppEvent>>
-    for _ in 0..2 {
-        if let Some(event) = conn.recv().await {
-            match event.as_ref() {
-                AppEvent::UserJoined { name } => println!("{name} joined"),
-                AppEvent::MessageSent { from, text } => println!("[{from}]: {text}"),
-            }
-        }
-    }
+    assert_eq!(
+        conn.recv().await.as_deref(),
+        Some(&AppEvent::UserJoined {
+            name: "Alice".to_string()
+        })
+    );
+    assert_eq!(
+        conn.recv().await.as_deref(),
+        Some(&AppEvent::MessageSent {
+            from: "Alice".to_string(),
+            text: "Hello, world!".to_string()
+        })
+    );
+    assert_eq!(
+        conn.recv().await.as_deref(),
+        Some(&AppEvent::LobbyMsg {
+            lobby: 64,
+            text: "Welcome to the lobby!".to_string()
+        })
+    );
+    assert_eq!(
+        conn.recv().await.as_deref(),
+        Some(&AppEvent::MessageSent {
+            from: "Alice".to_string(),
+            text: "Hello, world!".to_string()
+        })
+    );
 
-    // conn is dropped here, which automatically sends Disconnect to the bus
+    conn.subscribe(&LobbyMsg { lobby: 65 });
+    bus.emit(LobbyMsg { lobby: 65 }, "Welcome to the lobby!".to_string());
+
+    assert_eq!(
+        conn.recv().await.as_deref(),
+        Some(&AppEvent::LobbyMsg {
+            lobby: 65,
+            text: "Welcome to the lobby!".to_string()
+        })
+    );
 }

@@ -16,13 +16,16 @@ type TopicKey = u64;
 
 enum EventBusCmd<E> {
     Shutdown,
+    Connect {
+        conn_id: ConnId,
+        event_tx: mpsc::UnboundedSender<Arc<E>>,
+    },
     Disconnect {
         conn_id: ConnId,
     },
     Subscribe {
         conn_id: ConnId,
         topic_key: TopicKey,
-        event_tx: mpsc::UnboundedSender<Arc<E>>,
     },
     Unsubscribe {
         conn_id: ConnId,
@@ -70,10 +73,13 @@ impl<E: Send + Sync + 'static> EventBus<E> {
     pub fn connect(&self) -> Connection<E> {
         let conn_id = self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let _ = self
+            .inner
+            .cmd_tx
+            .send(EventBusCmd::Connect { conn_id, event_tx });
         Connection {
             conn_id,
             cmd_tx: self.inner.cmd_tx.clone(),
-            event_tx,
             event_rx,
         }
     }
@@ -87,6 +93,7 @@ impl<E: Send + Sync + 'static> EventBus<E> {
 }
 
 async fn bus_handler<E>(mut cmd_rx: mpsc::UnboundedReceiver<EventBusCmd<E>>) {
+    let mut conn_txs = AHashMap::<ConnId, mpsc::UnboundedSender<Arc<E>>>::new();
     let mut index =
         AHashMap::<TopicKey, IndexMap<ConnId, mpsc::UnboundedSender<Arc<E>>, RandomState>>::new();
     let mut conn_keys = AHashMap::<ConnId, IndexSet<TopicKey, RandomState>>::new();
@@ -108,27 +115,32 @@ async fn bus_handler<E>(mut cmd_rx: mpsc::UnboundedReceiver<EventBusCmd<E>>) {
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             EventBusCmd::Shutdown => break,
+            EventBusCmd::Connect { conn_id, event_tx } => {
+                conn_txs.insert(conn_id, event_tx);
+            }
             EventBusCmd::Disconnect { conn_id } => {
                 if let Some(keys) = conn_keys.remove(&conn_id) {
                     for key in keys {
                         remove_sub(&mut index, key, conn_id);
                     }
                 }
+                conn_txs.remove(&conn_id);
             }
-            EventBusCmd::Subscribe {
-                conn_id,
-                topic_key,
-                event_tx,
-            } => {
-                index
-                    .entry(topic_key)
-                    .or_default()
-                    .entry(conn_id)
-                    .or_insert(event_tx);
-                conn_keys.entry(conn_id).or_default().insert(topic_key);
+            EventBusCmd::Subscribe { conn_id, topic_key } => {
+                if let Some(tx) = conn_txs.get(&conn_id) {
+                    index
+                        .entry(topic_key)
+                        .or_default()
+                        .entry(conn_id)
+                        .or_insert_with(|| tx.clone());
+                    conn_keys.entry(conn_id).or_default().insert(topic_key);
+                }
             }
             EventBusCmd::Unsubscribe { conn_id, topic_key } => {
                 remove_sub(&mut index, topic_key, conn_id);
+                if let Some(keys) = conn_keys.get_mut(&conn_id) {
+                    keys.swap_remove(&topic_key);
+                }
             }
             EventBusCmd::Emit { topic_key, event } => {
                 if let Some(subs) = index.get(&topic_key) {
@@ -141,14 +153,13 @@ async fn bus_handler<E>(mut cmd_rx: mpsc::UnboundedReceiver<EventBusCmd<E>>) {
         }
     }
 
-    // dropping index closes all event_tx senders,
+    // dropping conn_txs and index closes all event channels,
     // causing every pending conn.recv() to return None
 }
 
 pub struct Connection<E> {
     conn_id: ConnId,
     cmd_tx: mpsc::UnboundedSender<EventBusCmd<E>>,
-    event_tx: mpsc::UnboundedSender<Arc<E>>,
     event_rx: mpsc::UnboundedReceiver<Arc<E>>,
 }
 
@@ -171,7 +182,6 @@ impl<E> Connection<E> {
     pub fn subscribe(&self, topic: &impl Topic<E>) {
         let _ = self.cmd_tx.send(EventBusCmd::Subscribe {
             conn_id: self.conn_id,
-            event_tx: self.event_tx.clone(),
             topic_key: hash_topic(topic),
         });
     }
@@ -183,6 +193,7 @@ impl<E> Connection<E> {
         });
     }
 
+    /// This method is cancel safe and will return `None` if the connection is dropped.
     pub async fn recv(&mut self) -> Option<Arc<E>> {
         self.event_rx.recv().await
     }
