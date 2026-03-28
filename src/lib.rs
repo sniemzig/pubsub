@@ -1,4 +1,5 @@
 use std::{
+    any::TypeId,
     hash::{Hash, Hasher},
     sync::{
         Arc,
@@ -49,7 +50,7 @@ pub struct EventBus<E> {
     inner: Arc<EventBusInner<E>>,
 }
 
-pub trait Topic<E>: Hash {
+pub trait Topic<E>: Hash + 'static {
     type Payload;
     fn into_event(self, payload: Self::Payload) -> E;
 }
@@ -159,8 +160,9 @@ impl<E> Drop for Connection<E> {
     }
 }
 
-fn hash_topic(topic: &impl Hash) -> TopicKey {
+fn hash_topic<T: Topic<E>, E>(topic: &T) -> TopicKey {
     let mut h = AHasher::default();
+    TypeId::of::<T>().hash(&mut h);
     topic.hash(&mut h);
     h.finish()
 }

@@ -2,15 +2,11 @@ use std::hash::Hash;
 
 use event_bus::{EventBus, Topic};
 
-// A single enum for all events on this bus.
 #[derive(Debug)]
 enum AppEvent {
     UserJoined { name: String },
     MessageSent { from: String, text: String },
 }
-
-// Each topic is a zero-sized type used both as the hash key
-// and as the constructor for its specific event variant.
 
 #[derive(Hash)]
 struct UserJoined;
