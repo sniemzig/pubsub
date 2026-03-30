@@ -18,8 +18,11 @@ struct LobbyMsg {
     lobby: u64,
 }
 
-impl pubsub::Topic<AppEvent> for LobbyMsg {
+impl pubsub::Topic for LobbyMsg {
     type Payload = String;
+}
+
+impl pubsub::IntoEvent<AppEvent> for LobbyMsg {
     fn into_event(self, text: String) -> AppEvent {
         AppEvent::LobbyMsg {
             lobby: self.lobby,
@@ -28,15 +31,21 @@ impl pubsub::Topic<AppEvent> for LobbyMsg {
     }
 }
 
-impl pubsub::Topic<AppEvent> for UserJoined {
+impl pubsub::Topic for UserJoined {
     type Payload = String;
+}
+
+impl pubsub::IntoEvent<AppEvent> for UserJoined {
     fn into_event(self, name: String) -> AppEvent {
         AppEvent::UserJoined { name }
     }
 }
 
-impl pubsub::Topic<AppEvent> for MessageSent {
+impl pubsub::Topic for MessageSent {
     type Payload = (String, String);
+}
+
+impl pubsub::IntoEvent<AppEvent> for MessageSent {
     fn into_event(self, (from, text): (String, String)) -> AppEvent {
         AppEvent::MessageSent { from, text }
     }

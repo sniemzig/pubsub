@@ -10,8 +10,11 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-pub trait Topic<E>: Hash + 'static {
+pub trait Topic: Hash + 'static {
     type Payload;
+}
+
+pub trait IntoEvent<E>: Topic {
     fn into_event(self, payload: Self::Payload) -> E;
 }
 
@@ -46,7 +49,7 @@ impl<E: Send + Sync + 'static> PubSub<E> {
         }
     }
 
-    pub fn emit<T: Topic<E>>(&self, topic: T, payload: T::Payload) {
+    pub fn emit<T: IntoEvent<E>>(&self, topic: T, payload: T::Payload) {
         let _ = self.inner.cmd_tx.send(PubSubCmd::Emit {
             topic_key: hash_topic(&topic),
             event: topic.into_event(payload),
@@ -61,14 +64,14 @@ pub struct Connection<E> {
 }
 
 impl<E> Connection<E> {
-    pub fn subscribe(&self, topic: &impl Topic<E>) {
+    pub fn subscribe(&self, topic: &impl IntoEvent<E>) {
         let _ = self.cmd_tx.send(PubSubCmd::Subscribe {
             conn_id: self.conn_id,
             topic_key: hash_topic(topic),
         });
     }
 
-    pub fn unsubscribe(&self, topic: &impl Topic<E>) {
+    pub fn unsubscribe(&self, topic: &impl IntoEvent<E>) {
         let _ = self.cmd_tx.send(PubSubCmd::Unsubscribe {
             conn_id: self.conn_id,
             topic_key: hash_topic(topic),
@@ -126,7 +129,7 @@ impl<E> Drop for PubSubInner<E> {
     }
 }
 
-fn hash_topic<T: Topic<E>, E>(topic: &T) -> TopicKey {
+fn hash_topic<T: IntoEvent<E>, E>(topic: &T) -> TopicKey {
     let mut h = AHasher::default();
     TypeId::of::<T>().hash(&mut h);
     topic.hash(&mut h);

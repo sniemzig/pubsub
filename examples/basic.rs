@@ -5,10 +5,13 @@ enum Event {
 
 #[derive(Hash)]
 struct ToastTopic;
-impl pubsub::Topic<Event> for ToastTopic {
+impl pubsub::Topic for ToastTopic {
     type Payload = String;
-    fn into_event(self, text: String) -> Event {
-        Event::Toast { text }
+}
+
+impl pubsub::IntoEvent<Event> for ToastTopic {
+    fn into_event(self, payload: Self::Payload) -> Event {
+        Event::Toast { text: payload }
     }
 }
 
@@ -16,12 +19,15 @@ impl pubsub::Topic<Event> for ToastTopic {
 struct LobbyMsgTopic {
     lobby: u64,
 }
-impl pubsub::Topic<Event> for LobbyMsgTopic {
+impl pubsub::Topic for LobbyMsgTopic {
     type Payload = String;
-    fn into_event(self, text: String) -> Event {
+}
+
+impl pubsub::IntoEvent<Event> for LobbyMsgTopic {
+    fn into_event(self, payload: Self::Payload) -> Event {
         Event::LobbyMsg {
             lobby: self.lobby,
-            text,
+            text: payload,
         }
     }
 }
