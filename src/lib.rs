@@ -18,9 +18,22 @@ pub trait IntoEvent<E>: Topic {
     fn into_event(self, payload: Self::Payload) -> E;
 }
 
-#[derive(Clone)]
+impl<T: Topic, E: From<T::Payload>> IntoEvent<E> for T {
+    fn into_event(self, payload: Self::Payload) -> E {
+        payload.into()
+    }
+}
+
 pub struct PubSub<E> {
     inner: Arc<PubSubInner<E>>,
+}
+
+impl<E> Clone for PubSub<E> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<E: Send + Sync + 'static> PubSub<E> {
