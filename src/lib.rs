@@ -1,3 +1,4 @@
+
 use ahash::{AHashMap, AHasher, RandomState};
 use indexmap::{IndexMap, IndexSet};
 use std::{
@@ -9,6 +10,9 @@ use std::{
     },
 };
 use tokio::sync::mpsc;
+
+mod macros;
+pub use macros::EventType;
 
 pub trait Topic: Hash + 'static {
     type Payload;

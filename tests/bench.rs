@@ -1,3 +1,5 @@
+// Move this into a actual benchmark suite like `criterion`...
+
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 
